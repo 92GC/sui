@@ -79,6 +79,7 @@ pub(super) fn committer<H: Handler + 'static>(
                      batch,
                      batch_len,
                      watermark,
+                     guard,
                  }| {
                     let batch = Arc::new(batch);
                     let handler = handler.clone();
@@ -201,6 +202,11 @@ pub(super) fn committer<H: Handler + 'static>(
                     };
 
                     async move {
+                        // Hold the row guard until after the commit so the
+                        // inflight counter stays accurate for collector
+                        // backpressure.
+                        let _guard = guard;
+
                         // Acquire rate-limiter tokens before connecting to the store, so we
                         // don't hold a connection while waiting. Large batches exceeding burst
                         // are acquired in chunks.
