@@ -251,6 +251,43 @@ impl Message for VersionedNodeInfo {
 pub type SignedVersionedNodeInfo = Envelope<VersionedNodeInfo, Ed25519Signature>;
 pub type VerifiedSignedVersionedNodeInfo = VerifiedEnvelope<VersionedNodeInfo, Ed25519Signature>;
 
+/// Verifies the signature and endpoint identity consistency of a
+/// `SignedVersionedNodeInfo`, returning a `VerifiedSignedVersionedNodeInfo`
+/// on success.
+///
+/// Checks:
+/// 1. The signature is valid for the P2P peer_id embedded in the node info.
+/// 2. Any non-P2P endpoint identities (e.g. `Consensus`) match the P2P
+///    peer_id, preventing a peer from advertising endpoints under another
+///    key.
+fn verify_versioned_node_info(
+    peer_info: &SignedVersionedNodeInfo,
+) -> Result<VerifiedSignedVersionedNodeInfo, &'static str> {
+    let peer_id = peer_info.peer_id().ok_or("missing P2P peer_id")?;
+
+    let public_key =
+        Ed25519PublicKey::from_bytes(&peer_id.0).map_err(|_| "invalid peer_id public key")?;
+
+    let msg = bcs::to_bytes(peer_info.data()).expect("BCS serialization should not fail");
+    public_key
+        .verify(&msg, peer_info.auth_sig())
+        .map_err(|_| "signature verification failed")?;
+
+    if let VersionedNodeInfo::V2(info_v2) = peer_info.data() {
+        let identities_valid = info_v2.addresses.keys().all(|eid| match eid {
+            EndpointId::P2p(_) => true,
+            EndpointId::Consensus(pubkey) => pubkey.as_bytes() == peer_id.0,
+        });
+        if !identities_valid {
+            return Err("non-P2P endpoint identity mismatch");
+        }
+    }
+
+    Ok(VerifiedSignedVersionedNodeInfo::new_from_verified(
+        peer_info.clone(),
+    ))
+}
+
 struct DiscoveryEventLoop {
     config: P2pConfig,
     discovery_config: Arc<DiscoveryConfig>,
@@ -1055,22 +1092,13 @@ fn update_known_peers_versioned(
             continue;
         }
 
-        let Ok(public_key) = Ed25519PublicKey::from_bytes(&peer_id.0) else {
-            debug_fatal!(
-                "Failed to convert anemo PeerId {:?} to Ed25519PublicKey",
-                peer_id
-            );
-            continue;
+        let peer = match verify_versioned_node_info(&peer_info) {
+            Ok(verified) => verified,
+            Err(reason) => {
+                info!("Discovery rejecting VersionedNodeInfo for peer {peer_id:?}: {reason}");
+                continue;
+            }
         };
-
-        let msg = bcs::to_bytes(peer_info.data()).expect("BCS serialization should not fail");
-        if let Err(e) = public_key.verify(&msg, peer_info.auth_sig()) {
-            info!(
-                "Discovery failed to verify signature for VersionedNodeInfo for peer {:?}: {e:?}",
-                peer_id
-            );
-            continue;
-        }
 
         // Forward non-P2P addresses from configured peers to EndpointManager.
         if configured_peers.contains_key(&peer_id)
@@ -1087,7 +1115,6 @@ fn update_known_peers_versioned(
             }
         }
 
-        let peer = VerifiedSignedVersionedNodeInfo::new_from_verified(peer_info);
         let peer_p2p_addresses = peer.p2p_addresses();
 
         match known_peers_v2.entry(peer_id) {
