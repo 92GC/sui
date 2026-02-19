@@ -24,7 +24,7 @@ use tracing::{info, warn};
 
 /// The minimum and maximum protocol versions supported by this build.
 const MIN_PROTOCOL_VERSION: u64 = 1;
-const MAX_PROTOCOL_VERSION: u64 = 112;
+const MAX_PROTOCOL_VERSION: u64 = 113;
 
 // Record history of protocol version allocations here:
 //
@@ -4595,6 +4595,10 @@ impl ProtocolConfig {
 
                     if chain != Chain::Mainnet && chain != Chain::Testnet {
                         cfg.feature_flags.enable_ristretto255_group_ops = true;
+                    }
+                }
+                113 => {
+                    if chain != Chain::Mainnet && chain != Chain::Testnet {
                         cfg.feature_flags.defer_unpaid_amplification = true;
                     }
                 }
