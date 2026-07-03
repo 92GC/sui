@@ -8,8 +8,8 @@ Add one native function on `sui::tx_context`:
 public fun current_command_range_hash(ctx: &TxContext, n: u64): vector<u8>
 ```
 
-This returns a versioned hash of the next `n` PTB commands after the current
-command.
+This returns a versioned hash of the current PTB command and the next `n - 1`
+commands.
 
 The point is simple: let a contract lock in the part of a PTB it cares about,
 while leaving the rest of the PTB open for wallets, solvers, sponsors, or other
@@ -43,7 +43,7 @@ composable without leaking PTB abstractions into Move.
 
 ```move
 module sui::tx_context {
-    /// Returns a hash of the next `n` commands after the current command.
+    /// Returns a hash of the current command and the next `n - 1` commands.
     /// Output: [version_byte | blake2b256_hash] (33 bytes).
     public fun current_command_range_hash(_self: &TxContext, n: u64): vector<u8>;
 }
@@ -51,14 +51,13 @@ module sui::tx_context {
 
 The current command is the PTB command that is currently executing this native.
 For example, if command 4 calls a smart account function that calls
-`current_command_range_hash(ctx, 3)`, the hash covers commands 5, 6, and 7.
+`current_command_range_hash(ctx, 3)`, the hash covers commands 4, 5, and 6.
 
-The current command acts as the verifier and is not part of the hash preimage.
-This avoids a fixed-point problem where the expected hash argument would
-otherwise be hashed inside the command that checks it.
+The current command is included in the hash.
 
-This lets the first command in a PTB act as the wallet or account-abstraction
-gate for the rest of the transaction.
+Because the current command is included, the expected hash should come from
+authenticated object state, such as an approved account or DAO intent. It should
+not be passed as a pure argument to the command being hashed.
 
 ### Output Format
 
@@ -69,10 +68,10 @@ gate for the rest of the transaction.
 - version `0x01` = current command range hash scheme
 - total output: 33 bytes
 
-If fewer than `n` commands remain after the current command, the function
-returns a domain-separated unavailable hash, not an abort. The unavailable hash
-must not collide with any valid command range hash. Callers should treat it as a
-normal hash comparison failure.
+If fewer than `n` commands remain in the PTB, the function returns a
+domain-separated unavailable hash, not an abort. The unavailable hash must not
+collide with any valid command range hash. Callers should treat it as a normal
+hash comparison failure.
 
 This lets contracts safely write:
 
@@ -87,8 +86,7 @@ without also needing to introspect PTB length.
 
 ### What Is Hashed
 
-The hash commits to the selected contiguous command range after the current
-command only.
+The hash commits to the selected contiguous command range only.
 
 For every command in the range, the encoder commits to:
 
@@ -116,7 +114,6 @@ The hash does not commit to:
 - gas coin object ID
 - gas coin version
 - object versions
-- current verifier command
 - commands before the selected range
 - commands after the selected range
 - absolute command position
@@ -181,14 +178,15 @@ of changing the Move API.
 The wallet or solver can build:
 
 ```text
-0. smart_account::authorize_next(account, intent_id, 3, ctx)
-1. fixed intent command
-2. fixed intent command
+0. solver setup command
+1. solver setup command
+2. smart_account::execute_intent(account, intent_id, 3, ctx)
 3. fixed intent command
-4. solver settlement command
+4. fixed intent command
+5. solver settlement command
 ```
 
-Inside command 0, the smart account checks:
+Inside command 2, the smart account checks:
 
 ```move
 let expected_hash = smart_account::approved_hash(account, intent_id);
@@ -196,12 +194,15 @@ let actual = tx_context::current_command_range_hash(ctx, 3);
 assert!(actual == expected_hash, EHashMismatch);
 ```
 
-The hash covers commands 1, 2, and 3.
+The hash covers commands 2, 3, and 4.
 
-Command 0 is the verifier and is not hashed. Command 4 is outside the range.
-The solver can change commands outside the range without changing the
-authorized intent, as long as the locked range still receives the right imported
-values and has the same command structure.
+Commands 0, 1, and 5 are not hashed. The solver can change them without
+changing the authorized intent, as long as the locked range still receives the
+right imported values and has the same command structure.
+
+The expected hash is loaded from the smart account's approved intent state. It
+is not a caller-supplied pure argument, so the hash does not require a fixed
+point.
 
 ## Why Not Full PTB Hash
 
@@ -222,7 +223,7 @@ but scoped to the current command range:
 1. Store or expose the current `ProgrammableTransaction` to `TxContext` during
    execution.
 2. Track the currently executing command index internally in the PTB executor.
-3. When the native is called, hash `(current_index, current_index + n]`.
+3. When the native is called, hash `[current_index, current_index + n)`.
 4. Encode in-range result references relatively.
 5. Encode references to earlier results as imports.
 6. Return the unavailable hash if the requested range runs past the end.
