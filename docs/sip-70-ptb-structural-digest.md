@@ -24,6 +24,9 @@ to be fixed.
 Apps currently need execution wrappers for every new function they want to call.
 This is messy UX and prevents JIT execution.
 
+This lets smart accounts, DAOs, and account-abstraction systems act as wallets
+and interact seamlessly without hard-coded pre-deployed wrappers.
+
 `current_command_range_hash(ctx, n)` keeps the primitive at the PTB layer:
 
 - fixed intent commands can be committed to
