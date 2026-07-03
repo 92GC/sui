@@ -104,6 +104,7 @@ The hash does not commit to:
 - gas price
 - gas coin object ID
 - gas coin version
+- object versions
 - commands before the selected range
 - commands after the selected range
 - absolute command position
@@ -120,7 +121,7 @@ Each PTB argument is normalized before hashing:
 | --- | --- | --- |
 | `GasCoin` | marker only | gas coin identity is sender-dependent and should not be part of intent |
 | `Pure(bytes)` | exact bytes | fixed parameter value |
-| `SharedObject` | ObjectID + mutability mode | stable object anchor plus lock semantics |
+| `SharedObject` | ObjectID + mutability mode | object versions are not stable across authorization and execution |
 | `ImmOrOwnedObject` | ObjectID | version can drift between authorization and execution |
 | `Receiving` | ObjectID | version can drift |
 | result inside range | relative command/result index | commits to flow inside the locked range |
