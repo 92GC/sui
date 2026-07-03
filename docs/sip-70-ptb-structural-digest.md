@@ -30,7 +30,6 @@ This is messy UX and prevents JIT execution.
 - solver/wallet commands before or after the range can stay open
 - Move receives only an opaque hash
 - no PTB introspection is exposed
-- no sub-PTB command is added
 
 This is idiomatic because it makes fixed intents and open solver execution
 composable without leaking PTB abstractions into Move.
@@ -46,8 +45,6 @@ module sui::tx_context {
     public fun current_command_range_hash(_self: &TxContext, n: u64): vector<u8>;
 }
 ```
-
-`n` must be greater than zero.
 
 The current command is the PTB command that is currently executing this native.
 For example, if command 4 calls a smart account function that calls
@@ -91,7 +88,9 @@ For every command in the range, the encoder commits to:
 - result flow between commands inside the range
 - imported values from outside the range, as imports
 
-All strings, byte blobs, and lists are length-framed.
+All strings, byte blobs, and lists are length-framed. That means the hash input
+includes each field's length before the field bytes, so two different command
+encodings cannot collide by concatenating to the same byte string.
 
 ### What Is Not Hashed
 
