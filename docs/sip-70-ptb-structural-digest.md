@@ -21,14 +21,8 @@ to be fixed.
 
 ## Motivation
 
-Sui PTBs are already the right execution model for composition. The missing
-piece is that Move cannot currently ask:
-
-> "Does the next part of this PTB match the thing I authorized?"
-
-Without that primitive, apps that need separated authorization and execution
-build wrappers, interpreters, action specs, or custom typed execution systems.
-That works, but it moves PTB semantics into application code.
+Apps currently need execution wrappers for every new function they want to call.
+This is messy UX and prevents JIT execution.
 
 `current_command_range_hash(ctx, n)` keeps the primitive at the PTB layer:
 
