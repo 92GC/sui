@@ -5,11 +5,11 @@
 Add one native function on `sui::tx_context`:
 
 ```move
-public fun current_command_range_hash(ctx: &TxContext, n: u64): vector<u8>
+public fun current_command_range_hash(ctx: &TxContext, additional_commands: u64): vector<u8>
 ```
 
-This returns a versioned hash of the current PTB command and the next `n - 1`
-commands.
+This returns a versioned hash of the current PTB command and the next
+`additional_commands` commands.
 
 The point is simple: let a contract lock in the part of a PTB it cares about,
 while leaving the rest of the PTB open for wallets, solvers, sponsors, or other
@@ -27,7 +27,8 @@ This is messy UX and prevents JIT execution.
 This lets smart accounts, DAOs, and account-abstraction systems act as wallets
 and interact seamlessly without hard-coded pre-deployed wrappers.
 
-`current_command_range_hash(ctx, n)` keeps the primitive at the PTB layer:
+`current_command_range_hash(ctx, additional_commands)` keeps the primitive at
+the PTB layer:
 
 - fixed intent commands can be committed to
 - solver/wallet commands before or after the range can stay open
@@ -43,17 +44,23 @@ composable without leaking PTB abstractions into Move.
 
 ```move
 module sui::tx_context {
-    /// Returns a hash of the current command and the next `n - 1` commands.
+    /// Returns a hash of the current command and the next `additional_commands`
+    /// commands.
     /// Output: [version_byte | blake2b256_hash] (33 bytes).
-    public fun current_command_range_hash(_self: &TxContext, n: u64): vector<u8>;
+    public fun current_command_range_hash(
+        _self: &TxContext,
+        additional_commands: u64,
+    ): vector<u8>;
 }
 ```
 
 The current command is the PTB command that is currently executing this native.
 For example, if command 4 calls a smart account function that calls
-`current_command_range_hash(ctx, 3)`, the hash covers commands 4, 5, and 6.
+`current_command_range_hash(ctx, 2)`, the hash covers commands 4, 5, and 6.
 
 The current command is included in the hash.
+
+`additional_commands = 0` hashes the current command only.
 
 Because the current command is included, the expected hash should come from
 authenticated object state, such as an approved account or DAO intent. It should
@@ -68,16 +75,17 @@ not be passed as a pure argument to the command being hashed.
 - version `0x01` = current command range hash scheme
 - total output: 33 bytes
 
-If fewer than `n` commands remain in the PTB, the function returns a
-domain-separated unavailable hash, not an abort. The unavailable hash must not
-collide with any valid command range hash. Callers should treat it as a normal
-hash comparison failure.
+If fewer than `additional_commands` commands remain after the current command,
+the function returns a domain-separated unavailable hash, not an abort. The
+unavailable hash must not collide with any valid command range hash. Callers
+should treat it as a normal hash comparison failure.
 
 This lets contracts safely write:
 
 ```move
+let actual = tx_context::current_command_range_hash(ctx, additional_commands);
 assert!(
-    tx_context::current_command_range_hash(ctx, n) == expected_hash,
+    actual == expected_hash,
     EHashMismatch,
 );
 ```
@@ -159,7 +167,7 @@ Conceptually:
 ```text
 range_hash = 0x01 || Blake2b256(
     "SUI_CURRENT_COMMAND_RANGE_HASH"
-    || n
+    || additional_commands
     || for each selected command in order:
         Blake2b256(
             command_kind
@@ -180,7 +188,7 @@ The wallet or solver can build:
 ```text
 0. solver setup command
 1. solver setup command
-2. smart_account::execute_intent(account, intent_id, 3, ctx)
+2. smart_account::execute_intent(account, intent_id, 2, ctx)
 3. fixed intent command
 4. fixed intent command
 5. solver settlement command
@@ -190,7 +198,7 @@ Inside command 2, the smart account checks:
 
 ```move
 let expected_hash = smart_account::approved_hash(account, intent_id);
-let actual = tx_context::current_command_range_hash(ctx, 3);
+let actual = tx_context::current_command_range_hash(ctx, 2);
 assert!(actual == expected_hash, EHashMismatch);
 ```
 
@@ -223,7 +231,8 @@ but scoped to the current command range:
 1. Store or expose the current `ProgrammableTransaction` to `TxContext` during
    execution.
 2. Track the currently executing command index internally in the PTB executor.
-3. When the native is called, hash `[current_index, current_index + n)`.
+3. When the native is called, hash the inclusive range
+   `[current_index, current_index + additional_commands]`.
 4. Encode in-range result references relatively.
 5. Encode references to earlier results as imports.
 6. Return the unavailable hash if the requested range runs past the end.
