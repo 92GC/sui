@@ -121,7 +121,7 @@ Each PTB argument is normalized before hashing:
 | --- | --- | --- |
 | `GasCoin` | marker only | gas coin identity is sender-dependent and should not be part of intent |
 | `Pure(bytes)` | exact bytes | fixed parameter value |
-| `SharedObject` | ObjectID + mutability mode | object versions are not stable across authorization and execution |
+| `SharedObject` | ObjectID + mutability mode | mutability changes lock/call semantics, so it is hashed; object versions are not stable |
 | `ImmOrOwnedObject` | ObjectID | version can drift between authorization and execution |
 | `Receiving` | ObjectID | version can drift |
 | result inside range | relative command/result index | commits to flow inside the locked range |
@@ -198,16 +198,8 @@ Smart accounts and governance usually want to authorize the important part of a
 transaction, not the exact gas setup, solver route, sponsorship details, or
 settlement tail.
 
-Whole-PTB commitment makes every solver/wallet implementation detail part of the
-authorization. That is hard to use and hard to support.
-
-Range hash keeps the protocol primitive smaller:
-
-- no new PTB command
-- no nested PTB execution
-- no full PTB introspection
-- no dependency on commands outside the authorized range
-- no sender/gas coupling
+A range hash lets the authorized part stay fixed while solver, wallet, and
+sponsorship logic stays flexible.
 
 ## Implementation Notes
 
